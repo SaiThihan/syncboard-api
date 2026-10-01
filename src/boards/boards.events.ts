@@ -1,0 +1,77 @@
+import type {
+  BoardSnapshot,
+  DrawingObject,
+  NewObject,
+  ObjectPatch,
+  User,
+} from './boards.types';
+
+export const ClientEvent = {
+  BoardJoin: 'board:join',
+  ObjectAdd: 'object:add',
+  ObjectUpdate: 'object:update',
+  ObjectDelete: 'object:delete',
+  CursorMove: 'cursor:move',
+} as const;
+
+export const ServerEvent = {
+  ObjectAdded: 'object:added',
+  ObjectUpdated: 'object:updated',
+  ObjectDeleted: 'object:deleted',
+  PresenceJoined: 'presence:joined',
+  PresenceLeft: 'presence:left',
+  CursorMoved: 'cursor:moved',
+} as const;
+
+// client -> server payloads
+export interface JoinBoardPayload {
+  boardId: string;
+  user: { id: string; name: string };
+}
+export interface ObjectAddPayload {
+  object: NewObject;
+}
+export interface ObjectUpdatePayload {
+  id: string;
+  patch: ObjectPatch;
+}
+export interface ObjectDeletePayload {
+  id: string;
+}
+export interface CursorMovePayload {
+  x: number;
+  y: number;
+}
+
+// ack data
+export interface JoinBoardAck {
+  board: BoardSnapshot;
+  me: User;
+}
+export interface VersionAck {
+  version: number;
+}
+
+// server -> client payloads
+export interface ObjectAddedPayload {
+  object: DrawingObject;
+}
+export interface ObjectUpdatedPayload {
+  id: string;
+  patch: ObjectPatch;
+  version: number;
+}
+export interface ObjectDeletedPayload {
+  id: string;
+}
+export interface PresenceJoinedPayload {
+  user: User;
+}
+export interface PresenceLeftPayload {
+  userId: string;
+}
+export interface CursorMovedPayload {
+  userId: string;
+  x: number;
+  y: number;
+}

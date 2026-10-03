@@ -1,9 +1,11 @@
 import { Matches } from 'class-validator';
 
-// The :id in /boards/:id. Board ids are 8 base64url characters.
+// Board ids are 8 base64url characters.
+export const BOARD_ID_PATTERN = /^[A-Za-z0-9_-]{8}$/;
+export const BOARD_ID_MESSAGE = 'id must be an 8 character board id';
+
+// The :id in /boards/:id.
 export class BoardIdParams {
-  @Matches(/^[A-Za-z0-9_-]{8}$/, {
-    message: 'id must be an 8 character board id',
-  })
+  @Matches(BOARD_ID_PATTERN, { message: BOARD_ID_MESSAGE })
   id: string;
 }

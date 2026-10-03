@@ -9,8 +9,8 @@ export class WsExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(WsExceptionFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost) {
-    const args = host.getArgs();
-    const ack: unknown = args[args.length - 1];
+    // The arguments are [socket, data, ack, eventName]; the ack is the only function.
+    const ack: unknown = host.getArgs().find((a) => typeof a === 'function');
 
     let response = fail('INTERNAL');
     if (exception instanceof AppError) {

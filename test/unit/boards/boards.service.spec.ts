@@ -1,12 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { AppError } from '../common/errors/errors';
-import { LIMITS } from '../common/limits/limits';
-import { BoardsService } from './boards.service';
+import { AppError } from '../../../src/common/errors/errors';
+import { LIMITS } from '../../../src/common/limits/limits';
+import { BoardsService } from '../../../src/boards/boards.service';
 import type {
   DrawingObject,
   NewObject,
   ObjectPatch,
-} from './types/boards.types';
+} from '../../../src/boards/types/boards.types';
 
 // Lets a test replace the random ID so we can force a collision.
 jest.mock('node:crypto', () => {
@@ -401,5 +401,162 @@ describe('BoardsService.deleteObject', () => {
     expect(codeOf(() => service.deleteObject('nope', 'o1'))).toBe(
       'BOARD_NOT_FOUND',
     );
+  });
+});
+
+describe('BoardsService empty board tracking', () => {
+  let service: TestBoardsService;
+  let boardId: string;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(1_000);
+    service = new TestBoardsService();
+    boardId = service.createBoard();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('starts as empty since the board was created', () => {
+    expect(service.getBoard(boardId).emptySince).toBe(1_000);
+  });
+
+  it('markOccupied clears emptySince', () => {
+    service.markOccupied(boardId);
+
+    expect(service.getBoard(boardId).emptySince).toBeNull();
+  });
+
+  it('markEmpty sets emptySince to now', () => {
+    service.markOccupied(boardId);
+    jest.setSystemTime(5_000);
+
+    service.markEmpty(boardId);
+
+    expect(service.getBoard(boardId).emptySince).toBe(5_000);
+  });
+
+  it('markEmpty keeps the first time when the board is already empty', () => {
+    jest.setSystemTime(9_000);
+
+    service.markEmpty(boardId);
+
+    expect(service.getBoard(boardId).emptySince).toBe(1_000);
+  });
+
+  it('starts a new empty period after someone joined and left', () => {
+    service.markOccupied(boardId);
+    jest.setSystemTime(7_000);
+    service.markEmpty(boardId);
+
+    expect(service.getBoard(boardId).emptySince).toBe(7_000);
+  });
+
+  it('does not touch the board objects', () => {
+    service.addObject(boardId, 'user-a', newRect('o1'));
+
+    service.markOccupied(boardId);
+    service.markEmpty(boardId);
+
+    expect(service.getBoard(boardId).objects.size).toBe(1);
+  });
+
+  it('throws BOARD_NOT_FOUND when the board does not exist', () => {
+    expect(codeOf(() => service.markEmpty('nope'))).toBe('BOARD_NOT_FOUND');
+    expect(codeOf(() => service.markOccupied('nope'))).toBe('BOARD_NOT_FOUND');
+  });
+});
+
+describe('BoardsService.deleteExpiredBoards', () => {
+  const TTL = LIMITS.emptyBoardTtlMs;
+  let service: TestBoardsService;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(0);
+    service = new TestBoardsService();
+  });
+
+  afterEach(() => {
+    service.onModuleDestroy();
+    jest.useRealTimers();
+  });
+
+  it('keeps a board that has been empty for less than the TTL', () => {
+    service.createBoard();
+    jest.setSystemTime(TTL - 1);
+
+    expect(service.deleteExpiredBoards()).toBe(0);
+    expect(service.store.size).toBe(1);
+  });
+
+  it('deletes a board that has been empty for exactly the TTL', () => {
+    const id = service.createBoard();
+    jest.setSystemTime(TTL);
+
+    expect(service.deleteExpiredBoards()).toBe(1);
+    expect(codeOf(() => service.getBoard(id))).toBe('BOARD_NOT_FOUND');
+  });
+
+  it('deletes a board and its objects after more than the TTL', () => {
+    const id = service.createBoard();
+    service.addObject(id, 'user-a', newRect('o1'));
+    jest.setSystemTime(TTL + 1);
+
+    service.deleteExpiredBoards();
+
+    expect(service.store.size).toBe(0);
+  });
+
+  it('never deletes a board that has people on it', () => {
+    const id = service.createBoard();
+    service.markOccupied(id);
+    jest.setSystemTime(TTL * 10);
+
+    expect(service.deleteExpiredBoards()).toBe(0);
+    expect(service.store.size).toBe(1);
+  });
+
+  it('deletes only the expired boards and returns how many', () => {
+    const busy = service.createBoard();
+    service.markOccupied(busy);
+    service.createBoard();
+    service.createBoard();
+    jest.setSystemTime(TTL);
+
+    expect(service.deleteExpiredBoards()).toBe(2);
+    expect(service.store.has(busy)).toBe(true);
+  });
+
+  it('starts a new TTL when someone joined and left again', () => {
+    const id = service.createBoard();
+    jest.setSystemTime(TTL - 1000);
+    service.markOccupied(id);
+    service.markEmpty(id); // empty again from here
+    jest.setSystemTime(TTL + 1000);
+
+    expect(service.deleteExpiredBoards()).toBe(0);
+    expect(service.store.has(id)).toBe(true);
+  });
+
+  it('deletes expired boards by itself once the timer is started', () => {
+    service.onModuleInit();
+    service.createBoard();
+
+    jest.advanceTimersByTime(TTL + LIMITS.sweepIntervalMs);
+
+    expect(service.store.size).toBe(0);
+  });
+
+  it('stops sweeping after the module is destroyed', () => {
+    service.onModuleInit();
+    service.createBoard();
+    service.onModuleDestroy();
+
+    jest.advanceTimersByTime(TTL * 2);
+
+    expect(service.store.size).toBe(1);
   });
 });

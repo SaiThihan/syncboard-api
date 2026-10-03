@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { AppError } from '../common/errors/errors';
 import { LIMITS } from '../common/limits/limits';
@@ -23,8 +23,21 @@ const PATCH_FIELDS: Record<DrawingObject['type'], string[]> = {
 };
 
 @Injectable()
-export class BoardsService {
+export class BoardsService implements OnModuleInit, OnModuleDestroy {
   protected readonly boards = new Map<string, BoardState>();
+  private sweepTimer?: NodeJS.Timeout;
+
+  onModuleInit(): void {
+    this.sweepTimer = setInterval(
+      () => this.deleteExpiredBoards(),
+      LIMITS.sweepIntervalMs,
+    );
+    this.sweepTimer.unref(); // this timer alone should not keep the process alive
+  }
+
+  onModuleDestroy(): void {
+    clearInterval(this.sweepTimer);
+  }
 
   createBoard(): string {
     if (this.boards.size >= LIMITS.maxBoards) {
@@ -106,5 +119,32 @@ export class BoardsService {
     if (!board.objects.delete(objectId)) {
       throw new AppError('OBJECT_NOT_FOUND');
     }
+  }
+
+  // Called by the gateway when the last person leaves. Keeps the first time if already empty.
+  markEmpty(boardId: string): void {
+    const board = this.getBoard(boardId);
+    board.emptySince ??= Date.now();
+  }
+
+  // Called by the gateway when someone joins.
+  markOccupied(boardId: string): void {
+    this.getBoard(boardId).emptySince = null;
+  }
+
+  // Deletes boards that have had nobody on them for the full TTL. Returns how many.
+  deleteExpiredBoards(): number {
+    const now = Date.now();
+    let deleted = 0;
+    for (const [id, board] of this.boards) {
+      const expired =
+        board.emptySince !== null &&
+        now - board.emptySince >= LIMITS.emptyBoardTtlMs;
+      if (expired) {
+        this.boards.delete(id);
+        deleted++;
+      }
+    }
+    return deleted;
   }
 }

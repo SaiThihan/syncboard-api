@@ -5,5 +5,6 @@ export const LIMITS = {
   maxObjectsPerBoard: 5000,
   maxBoards: 1000,
   emptyBoardTtlMs: 30 * 60 * 1000,
+  sweepIntervalMs: 60 * 1000,
   maxHttpBufferSize: 1_000_000,
 } as const;

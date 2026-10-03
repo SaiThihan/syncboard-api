@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { BoardState } from './boards.types';
+import type { BoardState } from './types/boards.types';
 
 @Injectable()
 export class BoardsService {

@@ -1,4 +1,4 @@
-import type { ErrorCode } from './errors';
+import type { ErrorCode } from '../errors/errors';
 
 export type Ack<T = undefined> =
   | { ok: true; data: T }

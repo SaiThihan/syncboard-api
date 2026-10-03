@@ -1,6 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, Logger } from '@nestjs/common';
-import { fail } from './ack';
-import { AppError } from './errors';
+import { fail } from '../acknowledgements/ack';
+import { AppError } from '../errors/errors';
 
 // Replies through the client's ack callback instead of Nest's default `exception` event,
 // so the client knows which request failed. Never disconnects the socket.

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { User } from '../boards/boards.types';
+import type { User } from '../boards/types/boards.types';
 
 export interface PresenceEntry {
   user: User;

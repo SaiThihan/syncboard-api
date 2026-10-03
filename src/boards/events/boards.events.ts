@@ -4,7 +4,7 @@ import type {
   NewObject,
   ObjectPatch,
   User,
-} from './boards.types';
+} from '../types/boards.types';
 
 export const ClientEvent = {
   BoardJoin: 'board:join',

@@ -1,8 +1,8 @@
 import { UseFilters } from '@nestjs/common';
 import { WebSocketGateway } from '@nestjs/websockets';
 import { CORS_ORIGIN } from '../common/config';
-import { LIMITS } from '../common/limits';
-import { WsExceptionFilter } from '../common/ws-exception.filter';
+import { LIMITS } from '../common/limits/limits';
+import { WsExceptionFilter } from '../common/websocket/ws-exception.filter';
 import { PresenceService } from '../presence/presence.service';
 import { BoardsService } from './boards.service';
 

@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { AppError } from '../common/errors/errors';
 import { LIMITS } from '../common/limits/limits';
 import { BoardsService } from './boards.service';
-import type { DrawingObject } from './types/boards.types';
+import type {
+  DrawingObject,
+  NewObject,
+  ObjectPatch,
+} from './types/boards.types';
 
 // Lets a test replace the random ID so we can force a collision.
 jest.mock('node:crypto', () => {
@@ -176,6 +180,225 @@ describe('BoardsService.getSnapshot', () => {
 
   it('throws BOARD_NOT_FOUND when the board does not exist', () => {
     expect(codeOf(() => service.getSnapshot('doesnotexist'))).toBe(
+      'BOARD_NOT_FOUND',
+    );
+  });
+});
+
+const newRect = (id: string): NewObject => ({
+  id,
+  type: 'rect',
+  x: 10,
+  y: 20,
+  stroke: '#000000',
+  strokeWidth: 2,
+  width: 100,
+  height: 50,
+});
+
+describe('BoardsService.addObject', () => {
+  let service: TestBoardsService;
+  let boardId: string;
+
+  beforeEach(() => {
+    service = new TestBoardsService();
+    boardId = service.createBoard();
+  });
+
+  it('saves the object with the author and version 1, and returns it', () => {
+    const saved = service.addObject(boardId, 'user-a', newRect('o1'));
+
+    expect(saved).toMatchObject({ id: 'o1', authorId: 'user-a', version: 1 });
+    expect(service.getBoard(boardId).objects.get('o1')).toBe(saved);
+  });
+
+  it('ignores an author or version sent by the client', () => {
+    const cheating = {
+      ...newRect('o1'),
+      authorId: 'someone-else',
+      version: 99,
+    } as NewObject;
+
+    const saved = service.addObject(boardId, 'user-a', cheating);
+
+    expect(saved.authorId).toBe('user-a');
+    expect(saved.version).toBe(1);
+  });
+
+  it('keeps objects in the order they were added', () => {
+    service.addObject(boardId, 'user-a', newRect('first'));
+    service.addObject(boardId, 'user-a', newRect('second'));
+
+    const ids = service.getSnapshot(boardId).objects.map((o) => o.id);
+
+    expect(ids).toEqual(['first', 'second']);
+  });
+
+  it('throws DUPLICATE_OBJECT and keeps the original when the id exists', () => {
+    const original = service.addObject(boardId, 'user-a', newRect('o1'));
+
+    expect(
+      codeOf(() => service.addObject(boardId, 'user-b', newRect('o1'))),
+    ).toBe('DUPLICATE_OBJECT');
+    expect(service.getBoard(boardId).objects.get('o1')).toBe(original);
+  });
+
+  it('throws BOARD_FULL when the board has reached the object limit', () => {
+    for (let i = 0; i < LIMITS.maxObjectsPerBoard; i++) {
+      service.addObject(boardId, 'user-a', newRect(`o${i}`));
+    }
+
+    expect(
+      codeOf(() => service.addObject(boardId, 'user-a', newRect('extra'))),
+    ).toBe('BOARD_FULL');
+    expect(service.getBoard(boardId).objects.size).toBe(
+      LIMITS.maxObjectsPerBoard,
+    );
+  });
+
+  it('throws BOARD_NOT_FOUND when the board does not exist', () => {
+    expect(
+      codeOf(() => service.addObject('doesnotexist', 'user-a', newRect('o1'))),
+    ).toBe('BOARD_NOT_FOUND');
+  });
+});
+
+describe('BoardsService.updateObject', () => {
+  let service: TestBoardsService;
+  let boardId: string;
+
+  beforeEach(() => {
+    service = new TestBoardsService();
+    boardId = service.createBoard();
+    service.addObject(boardId, 'user-a', newRect('o1'));
+  });
+
+  it('applies the patch, raises the version and returns the shape', () => {
+    const updated = service.updateObject(boardId, 'o1', { x: 150, y: 90 });
+
+    expect(updated).toMatchObject({ id: 'o1', x: 150, y: 90, version: 2 });
+    expect(service.getBoard(boardId).objects.get('o1')).toBe(updated);
+  });
+
+  it('keeps the fields that were not in the patch', () => {
+    const updated = service.updateObject(boardId, 'o1', { x: 150 });
+
+    expect(updated).toMatchObject({ y: 20, width: 100, authorId: 'user-a' });
+  });
+
+  it('raises the version on every update', () => {
+    service.updateObject(boardId, 'o1', { x: 1 });
+    const updated = service.updateObject(boardId, 'o1', { x: 2 });
+
+    expect(updated.version).toBe(3);
+  });
+
+  it('lets another user change the shape without changing its author', () => {
+    const updated = service.updateObject(boardId, 'o1', { x: 190 });
+
+    expect(updated.authorId).toBe('user-a');
+  });
+
+  it('keeps the drawing order', () => {
+    service.addObject(boardId, 'user-a', newRect('o2'));
+
+    service.updateObject(boardId, 'o1', { x: 5 });
+
+    const ids = service.getSnapshot(boardId).objects.map((o) => o.id);
+    expect(ids).toEqual(['o1', 'o2']);
+  });
+
+  it.each(['id', 'type', 'authorId', 'version'])(
+    'rejects a patch that changes %s',
+    (field) => {
+      const patch = { [field]: 'x' } as ObjectPatch;
+
+      expect(codeOf(() => service.updateObject(boardId, 'o1', patch))).toBe(
+        'VALIDATION_FAILED',
+      );
+      expect(service.getBoard(boardId).objects.get('o1')?.version).toBe(1);
+    },
+  );
+
+  it('rejects a field the shape type does not have', () => {
+    service.addObject(boardId, 'user-a', {
+      id: 'a1',
+      type: 'arrow',
+      x: 0,
+      y: 0,
+      dx: 50,
+      dy: 50,
+      stroke: '#000000',
+      strokeWidth: 2,
+    });
+
+    expect(
+      codeOf(() => service.updateObject(boardId, 'a1', { width: 9 })),
+    ).toBe('VALIDATION_FAILED');
+  });
+
+  it('rejects an empty patch', () => {
+    expect(codeOf(() => service.updateObject(boardId, 'o1', {}))).toBe(
+      'VALIDATION_FAILED',
+    );
+  });
+
+  it('throws OBJECT_NOT_FOUND when the shape does not exist', () => {
+    expect(codeOf(() => service.updateObject(boardId, 'nope', { x: 1 }))).toBe(
+      'OBJECT_NOT_FOUND',
+    );
+  });
+
+  it('throws BOARD_NOT_FOUND when the board does not exist', () => {
+    expect(codeOf(() => service.updateObject('nope', 'o1', { x: 1 }))).toBe(
+      'BOARD_NOT_FOUND',
+    );
+  });
+});
+
+describe('BoardsService.deleteObject', () => {
+  let service: TestBoardsService;
+  let boardId: string;
+
+  beforeEach(() => {
+    service = new TestBoardsService();
+    boardId = service.createBoard();
+    service.addObject(boardId, 'user-a', newRect('o1'));
+    service.addObject(boardId, 'user-a', newRect('o2'));
+    service.addObject(boardId, 'user-a', newRect('o3'));
+  });
+
+  it('removes the shape from the board', () => {
+    service.deleteObject(boardId, 'o2');
+
+    expect(service.getBoard(boardId).objects.has('o2')).toBe(false);
+    expect(service.getBoard(boardId).objects.size).toBe(2);
+  });
+
+  it('keeps the other shapes in their drawing order', () => {
+    service.deleteObject(boardId, 'o2');
+
+    const ids = service.getSnapshot(boardId).objects.map((o) => o.id);
+    expect(ids).toEqual(['o1', 'o3']);
+  });
+
+  it('throws OBJECT_NOT_FOUND when the shape does not exist', () => {
+    expect(codeOf(() => service.deleteObject(boardId, 'nope'))).toBe(
+      'OBJECT_NOT_FOUND',
+    );
+    expect(service.getBoard(boardId).objects.size).toBe(3);
+  });
+
+  it('throws OBJECT_NOT_FOUND when deleting the same shape twice', () => {
+    service.deleteObject(boardId, 'o1');
+
+    expect(codeOf(() => service.deleteObject(boardId, 'o1'))).toBe(
+      'OBJECT_NOT_FOUND',
+    );
+  });
+
+  it('throws BOARD_NOT_FOUND when the board does not exist', () => {
+    expect(codeOf(() => service.deleteObject('nope', 'o1'))).toBe(
       'BOARD_NOT_FOUND',
     );
   });

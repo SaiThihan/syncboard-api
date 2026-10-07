@@ -59,4 +59,52 @@ describe('PresenceService', () => {
     });
     expect(presence.getBySocket('unknown')).toBeUndefined();
   });
+
+  describe('leave', () => {
+    it('keeps the user on the board while another connection is open', () => {
+      presence.join('s1', 'board1', ben);
+      presence.join('s2', 'board1', ben);
+
+      const result = presence.leave('s1');
+
+      expect(result).toMatchObject({
+        boardId: 'board1',
+        user: { id: 'u2' },
+        isLastSocket: false,
+      });
+      expect(presence.getRoster('board1').map((u) => u.name)).toEqual(['Ben']);
+      expect(presence.getBySocket('s1')).toBeUndefined();
+    });
+
+    it('removes the user when their last connection leaves', () => {
+      presence.join('s1', 'board1', ben);
+      presence.join('s2', 'board1', ben);
+      presence.leave('s1');
+
+      const result = presence.leave('s2');
+
+      expect(result?.isLastSocket).toBe(true);
+      expect(presence.getRoster('board1')).toEqual([]);
+    });
+
+    it('does not remove other users from the board', () => {
+      presence.join('s1', 'board1', ana);
+      presence.join('s2', 'board1', ben);
+
+      presence.leave('s2');
+
+      expect(presence.getRoster('board1').map((u) => u.name)).toEqual(['Ana']);
+    });
+
+    it('returns undefined for a connection that never joined', () => {
+      expect(presence.leave('never-joined')).toBeUndefined();
+    });
+
+    it('returns undefined the second time the same connection leaves', () => {
+      presence.join('s1', 'board1', ana);
+      presence.leave('s1');
+
+      expect(presence.leave('s1')).toBeUndefined();
+    });
+  });
 });

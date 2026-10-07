@@ -52,6 +52,26 @@ export class PresenceService {
     return { user: entry.user, isFirstSocket };
   }
 
+  // Removes a connection. `isLastSocket` is true when the user has no other
+  // connection left on the board. Returns undefined for a socket that never joined.
+  leave(
+    socketId: string,
+  ): { boardId: string; user: User; isLastSocket: boolean } | undefined {
+    const found = this.bySocket.get(socketId);
+    if (!found) return undefined;
+    const { boardId, user } = found;
+    this.bySocket.delete(socketId);
+
+    const room = this.byBoard.get(boardId);
+    const entry = room?.get(user.id);
+    entry?.sockets.delete(socketId);
+
+    const isLastSocket = !entry || entry.sockets.size === 0;
+    if (isLastSocket) room?.delete(user.id);
+    if (room?.size === 0) this.byBoard.delete(boardId);
+    return { boardId, user, isLastSocket };
+  }
+
   getBySocket(socketId: string): { boardId: string; user: User } | undefined {
     return this.bySocket.get(socketId);
   }

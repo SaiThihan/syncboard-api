@@ -106,6 +106,23 @@ describe('BoardsGateway object:update (e2e)', () => {
     expect(shape()?.authorId).toBe(ANA.id);
   });
 
+  it('keeps the last of two updates to the same shape and tells each user about the other', async () => {
+    const ana = await joined(ANA);
+    const ben = await joined(BEN);
+    const seenByAna = record<ObjectUpdatedPayload>(ana, 'object:updated');
+    const seenByBen = record<ObjectUpdatedPayload>(ben, 'object:updated');
+
+    const first = await update(ben, shapeId, { x: 300 });
+    const second = await update(ana, shapeId, { x: 500 });
+    await sleep(100);
+
+    expect(first).toEqual({ ok: true, data: { version: 2 } });
+    expect(second).toEqual({ ok: true, data: { version: 3 } });
+    expect(shape()).toMatchObject({ x: 500, version: 3 });
+    expect(seenByAna).toEqual([{ id: shapeId, patch: { x: 300 }, version: 2 }]);
+    expect(seenByBen).toEqual([{ id: shapeId, patch: { x: 500 }, version: 3 }]);
+  });
+
   it('does not send it to people on other boards', async () => {
     const ana = await joined(ANA);
     const cal = await joined(CAL, boards.createBoard());

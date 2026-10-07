@@ -2,10 +2,12 @@ import { UseFilters, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
+  WebSocketServer,
 } from '@nestjs/websockets';
-import type { Socket } from 'socket.io';
+import type { Server, Socket } from 'socket.io';
 import { type Ack, ok } from '../common/acknowledgements/ack';
 import { CORS_ORIGIN } from '../common/config';
 import { AppError } from '../common/errors/errors';
@@ -21,6 +23,7 @@ import {
   ClientEvent,
   JoinBoardAck,
   ObjectUpdatedPayload,
+  PresenceLeftPayload,
   ServerEvent,
   VersionAck,
 } from './events/boards.events';
@@ -38,7 +41,10 @@ import {
   cors: { origin: CORS_ORIGIN },
   maxHttpBufferSize: LIMITS.maxHttpBufferSize,
 })
-export class BoardsGateway {
+export class BoardsGateway implements OnGatewayDisconnect {
+  @WebSocketServer()
+  private readonly server!: Server;
+
   constructor(
     private readonly boards: BoardsService,
     private readonly presence: PresenceService,
@@ -114,6 +120,20 @@ export class BoardsGateway {
 
     socket.to(boardId).emit(ServerEvent.ObjectDeleted, { id: dto.id });
     return ok(undefined);
+  }
+
+  // Runs for every closed connection, including ones that never joined a board.
+  handleDisconnect(socket: Socket): void {
+    const left = this.presence.leave(socket.id);
+    if (!left) return;
+
+    if (left.isLastSocket) {
+      const payload: PresenceLeftPayload = { userId: left.user.id };
+      this.server.to(left.boardId).emit(ServerEvent.PresenceLeft, payload);
+    }
+    if (this.presence.getRoster(left.boardId).length === 0) {
+      this.boards.markEmpty(left.boardId); // starts the 30 minute timer
+    }
   }
 
   // The board and user come from what the server recorded at join, never from the browser.

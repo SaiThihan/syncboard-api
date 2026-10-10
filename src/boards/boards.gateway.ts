@@ -18,9 +18,11 @@ import { BoardsService } from './boards.service';
 import { AddObjectDto } from './dto/add-object.dto';
 import { DeleteObjectDto } from './dto/delete-object.dto';
 import { JoinBoardDto } from './dto/join-board.dto';
+import { MoveCursorDto } from './dto/move-cursor.dto';
 import { toObjectPatch, UpdateObjectDto } from './dto/update-object.dto';
 import {
   ClientEvent,
+  CursorMovedPayload,
   JoinBoardAck,
   ObjectUpdatedPayload,
   PresenceLeftPayload,
@@ -120,6 +122,18 @@ export class BoardsGateway implements OnGatewayDisconnect {
 
     socket.to(boardId).emit(ServerEvent.ObjectDeleted, { id: dto.id });
     return ok(undefined);
+  }
+
+  // Cursors are not stored and have no ack. `volatile` drops the message for a
+  // slow client instead of queueing it; the next move replaces it anyway.
+  @SubscribeMessage(ClientEvent.CursorMove)
+  moveCursor(
+    @MessageBody() dto: MoveCursorDto,
+    @ConnectedSocket() socket: Socket,
+  ): void {
+    const { boardId, user } = this.requireJoined(socket);
+    const payload: CursorMovedPayload = { userId: user.id, x: dto.x, y: dto.y };
+    socket.volatile.to(boardId).emit(ServerEvent.CursorMoved, payload);
   }
 
   // Runs for every closed connection, including ones that never joined a board.

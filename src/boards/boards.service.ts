@@ -2,12 +2,14 @@ import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { AppError } from '../common/errors/errors';
 import { LIMITS } from '../common/limits/limits';
+import { PresenceService } from '../presence/presence.service';
 import type {
   BoardSnapshot,
   BoardState,
   DrawingObject,
   NewObject,
   ObjectPatch,
+  User,
 } from './types/boards.types';
 
 const ID_RETRIES = 5;
@@ -26,6 +28,8 @@ const PATCH_FIELDS: Record<DrawingObject['type'], string[]> = {
 export class BoardsService implements OnModuleInit, OnModuleDestroy {
   protected readonly boards = new Map<string, BoardState>();
   private sweepTimer?: NodeJS.Timeout;
+
+  constructor(private readonly presence: PresenceService) {}
 
   onModuleInit(): void {
     this.sweepTimer = setInterval(
@@ -69,7 +73,7 @@ export class BoardsService implements OnModuleInit, OnModuleDestroy {
     return board;
   }
 
-  // The gateway adds `users` from presence; the board only knows its objects.
+  // The board only knows its objects; `join` adds `users` from presence.
   getSnapshot(id: string): Omit<BoardSnapshot, 'users'> {
     const board = this.getBoard(id);
     return { id: board.id, objects: [...board.objects.values()] };
@@ -121,13 +125,49 @@ export class BoardsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Called by the gateway when the last person leaves. Keeps the first time if already empty.
+  // Registers a connection on a board and starts or stops the empty-board timer.
+  // `isFirstSocket` is false when the same user is already on the board in another tab.
+  join(
+    socketId: string,
+    boardId: string,
+    who: { id: string; name: string },
+  ): { user: User; isFirstSocket: boolean; board: BoardSnapshot } {
+    if (this.presence.getBySocket(socketId)) {
+      throw new AppError('ALREADY_JOINED');
+    }
+    this.getBoard(boardId); // throws BOARD_NOT_FOUND before anything is registered
+
+    const { user, isFirstSocket } = this.presence.join(socketId, boardId, who);
+    this.markOccupied(boardId);
+    return {
+      user,
+      isFirstSocket,
+      board: {
+        ...this.getSnapshot(boardId),
+        users: this.presence.getRoster(boardId),
+      },
+    };
+  }
+
+  // Removes a connection. When nobody is left on the board, its 30 minute timer starts.
+  // Returns undefined for a connection that never joined a board.
+  leave(
+    socketId: string,
+  ): { boardId: string; user: User; isLastSocket: boolean } | undefined {
+    const left = this.presence.leave(socketId);
+    if (left && this.presence.getRoster(left.boardId).length === 0) {
+      this.markEmpty(left.boardId);
+    }
+    return left;
+  }
+
+  // Starts the empty-board timer. Keeps the first time if the board is already empty.
   markEmpty(boardId: string): void {
     const board = this.getBoard(boardId);
     board.emptySince ??= Date.now();
   }
 
-  // Called by the gateway when someone joins.
+  // Stops the empty-board timer.
   markOccupied(boardId: string): void {
     this.getBoard(boardId).emptySince = null;
   }

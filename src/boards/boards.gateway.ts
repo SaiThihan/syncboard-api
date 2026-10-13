@@ -57,29 +57,17 @@ export class BoardsGateway implements OnGatewayDisconnect {
     @MessageBody() dto: JoinBoardDto,
     @ConnectedSocket() socket: Socket,
   ): Promise<Ack<JoinBoardAck>> {
-    if (this.presence.getBySocket(socket.id)) {
-      throw new AppError('ALREADY_JOINED');
-    }
-    this.boards.getBoard(dto.boardId); // throws BOARD_NOT_FOUND before anything is registered
-
-    const { user, isFirstSocket } = this.presence.join(
+    const { user, isFirstSocket, board } = this.boards.join(
       socket.id,
       dto.boardId,
       dto.user,
     );
     await socket.join(dto.boardId); // the room is named after the board
-    this.boards.markOccupied(dto.boardId);
 
     if (isFirstSocket) {
       socket.to(dto.boardId).emit(ServerEvent.PresenceJoined, { user });
     }
-    return ok({
-      board: {
-        ...this.boards.getSnapshot(dto.boardId),
-        users: this.presence.getRoster(dto.boardId),
-      },
-      me: user,
-    });
+    return ok({ board, me: user });
   }
 
   @SubscribeMessage(ClientEvent.ObjectAdd)
@@ -138,15 +126,10 @@ export class BoardsGateway implements OnGatewayDisconnect {
 
   // Runs for every closed connection, including ones that never joined a board.
   handleDisconnect(socket: Socket): void {
-    const left = this.presence.leave(socket.id);
-    if (!left) return;
-
-    if (left.isLastSocket) {
+    const left = this.boards.leave(socket.id);
+    if (left?.isLastSocket) {
       const payload: PresenceLeftPayload = { userId: left.user.id };
       this.server.to(left.boardId).emit(ServerEvent.PresenceLeft, payload);
-    }
-    if (this.presence.getRoster(left.boardId).length === 0) {
-      this.boards.markEmpty(left.boardId); // starts the 30 minute timer
     }
   }
 

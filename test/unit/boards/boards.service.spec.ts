@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { AppError } from '../../../src/common/errors/errors';
 import { LIMITS } from '../../../src/common/limits/limits';
 import { BoardsService } from '../../../src/boards/boards.service';
+import { PresenceService } from '../../../src/presence/presence.service';
 import type {
   DrawingObject,
   NewObject,
@@ -38,7 +39,7 @@ describe('BoardsService.createBoard', () => {
   let service: TestBoardsService;
 
   beforeEach(() => {
-    service = new TestBoardsService();
+    service = new TestBoardsService(new PresenceService());
   });
 
   afterEach(() => {
@@ -97,7 +98,7 @@ describe('BoardsService.getBoard', () => {
   let service: TestBoardsService;
 
   beforeEach(() => {
-    service = new TestBoardsService();
+    service = new TestBoardsService(new PresenceService());
   });
 
   afterEach(() => {
@@ -148,7 +149,7 @@ describe('BoardsService.getSnapshot', () => {
   let service: TestBoardsService;
 
   beforeEach(() => {
-    service = new TestBoardsService();
+    service = new TestBoardsService(new PresenceService());
   });
 
   it('returns the board id and its objects as a list in drawing order', () => {
@@ -201,7 +202,7 @@ describe('BoardsService.addObject', () => {
   let boardId: string;
 
   beforeEach(() => {
-    service = new TestBoardsService();
+    service = new TestBoardsService(new PresenceService());
     boardId = service.createBoard();
   });
 
@@ -268,7 +269,7 @@ describe('BoardsService.updateObject', () => {
   let boardId: string;
 
   beforeEach(() => {
-    service = new TestBoardsService();
+    service = new TestBoardsService(new PresenceService());
     boardId = service.createBoard();
     service.addObject(boardId, 'user-a', newRect('o1'));
   });
@@ -361,7 +362,7 @@ describe('BoardsService.deleteObject', () => {
   let boardId: string;
 
   beforeEach(() => {
-    service = new TestBoardsService();
+    service = new TestBoardsService(new PresenceService());
     boardId = service.createBoard();
     service.addObject(boardId, 'user-a', newRect('o1'));
     service.addObject(boardId, 'user-a', newRect('o2'));
@@ -411,7 +412,7 @@ describe('BoardsService empty board tracking', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.setSystemTime(1_000);
-    service = new TestBoardsService();
+    service = new TestBoardsService(new PresenceService());
     boardId = service.createBoard();
   });
 
@@ -476,7 +477,7 @@ describe('BoardsService.deleteExpiredBoards', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.setSystemTime(0);
-    service = new TestBoardsService();
+    service = new TestBoardsService(new PresenceService());
   });
 
   afterEach(() => {
@@ -558,5 +559,108 @@ describe('BoardsService.deleteExpiredBoards', () => {
     jest.advanceTimersByTime(TTL * 2);
 
     expect(service.store.size).toBe(1);
+  });
+});
+
+describe('BoardsService.join and leave', () => {
+  let presence: PresenceService;
+  let service: TestBoardsService;
+  let boardId: string;
+  const ana = { id: 'u1', name: 'Ana' };
+  const ben = { id: 'u2', name: 'Ben' };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(1_000);
+    presence = new PresenceService();
+    service = new TestBoardsService(presence);
+    boardId = service.createBoard();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  describe('join', () => {
+    it('returns who joined, whether it is their first connection, and the board with its users', () => {
+      const result = service.join('s1', boardId, ana);
+
+      expect(result.isFirstSocket).toBe(true);
+      expect(result.user).toMatchObject({ id: 'u1', name: 'Ana' });
+      expect(result.board).toMatchObject({ id: boardId, objects: [] });
+      expect(result.board.users.map((u) => u.name)).toEqual(['Ana']);
+    });
+
+    it('says a second connection of the same user is not their first', () => {
+      service.join('s1', boardId, ana);
+
+      expect(service.join('s2', boardId, ana).isFirstSocket).toBe(false);
+    });
+
+    it('stops the empty timer', () => {
+      expect(service.getBoard(boardId).emptySince).toBe(1_000);
+
+      service.join('s1', boardId, ana);
+
+      expect(service.getBoard(boardId).emptySince).toBeNull();
+    });
+
+    it('throws BOARD_NOT_FOUND and registers nobody for a board that does not exist', () => {
+      expect(codeOf(() => service.join('s1', 'nope', ana))).toBe(
+        'BOARD_NOT_FOUND',
+      );
+      expect(presence.getBySocket('s1')).toBeUndefined();
+    });
+
+    it('throws ALREADY_JOINED when the same connection joins twice', () => {
+      service.join('s1', boardId, ana);
+
+      expect(codeOf(() => service.join('s1', boardId, ben))).toBe(
+        'ALREADY_JOINED',
+      );
+      expect(presence.getRoster(boardId).map((u) => u.name)).toEqual(['Ana']);
+    });
+  });
+
+  describe('leave', () => {
+    it('starts the empty timer when the last person leaves', () => {
+      service.join('s1', boardId, ana);
+      jest.setSystemTime(5_000);
+
+      const left = service.leave('s1');
+
+      expect(left).toMatchObject({
+        boardId,
+        user: { id: 'u1' },
+        isLastSocket: true,
+      });
+      expect(service.getBoard(boardId).emptySince).toBe(5_000);
+    });
+
+    it('keeps the board occupied while someone else is still on it', () => {
+      service.join('s1', boardId, ana);
+      service.join('s2', boardId, ben);
+
+      service.leave('s2');
+
+      expect(service.getBoard(boardId).emptySince).toBeNull();
+    });
+
+    it('keeps the board occupied while the same user has another connection', () => {
+      service.join('s1', boardId, ana);
+      service.join('s2', boardId, ana);
+
+      const left = service.leave('s1');
+
+      expect(left?.isLastSocket).toBe(false);
+      expect(service.getBoard(boardId).emptySince).toBeNull();
+    });
+
+    it('returns undefined and changes nothing for a connection that never joined', () => {
+      service.join('s1', boardId, ana);
+
+      expect(service.leave('stranger')).toBeUndefined();
+      expect(service.getBoard(boardId).emptySince).toBeNull();
+    });
   });
 });

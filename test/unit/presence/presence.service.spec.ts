@@ -25,6 +25,19 @@ describe('PresenceService', () => {
     expect(a.color).not.toBe(b.color);
   });
 
+  it('reuses colours once every colour on the board is taken', () => {
+    const colors = Array.from(
+      { length: 9 },
+      (_, i) =>
+        presence.join(`s${i}`, 'board1', { id: `u${i}`, name: `User ${i}` })
+          .user.color,
+    );
+
+    expect(new Set(colors.slice(0, 8)).size).toBe(8);
+    expect(colors.slice(0, 8)).toContain(colors[8]);
+    expect(presence.getRoster('board1')).toHaveLength(9);
+  });
+
   it('treats a second connection of the same user as the same person', () => {
     const first = presence.join('s1', 'board1', ana);
     const second = presence.join('s2', 'board1', ana);

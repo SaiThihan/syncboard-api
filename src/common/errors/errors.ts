@@ -1,4 +1,5 @@
 export type ErrorCode =
+  | 'NOT_FOUND'
   | 'BOARD_NOT_FOUND'
   | 'NOT_JOINED'
   | 'ALREADY_JOINED'
@@ -11,6 +12,7 @@ export type ErrorCode =
 
 // How each error code is reported over HTTP (REST).
 export const HTTP_STATUS: Record<ErrorCode, number> = {
+  NOT_FOUND: 404,
   BOARD_NOT_FOUND: 404,
   OBJECT_NOT_FOUND: 404,
   VALIDATION_FAILED: 400,

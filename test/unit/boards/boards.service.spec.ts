@@ -218,12 +218,65 @@ describe('BoardsService.addObject', () => {
       ...newRect('o1'),
       authorId: 'someone-else',
       version: 99,
-    } as NewObject;
+    } as unknown as NewObject;
 
     const saved = service.addObject(boardId, 'user-a', cheating);
 
     expect(saved.authorId).toBe('user-a');
     expect(saved.version).toBe(1);
+  });
+
+  describe('pen point budget', () => {
+    const stroke = (id: string, points: number): NewObject => ({
+      id,
+      type: 'pen',
+      x: 0,
+      y: 0,
+      stroke: '#000000',
+      strokeWidth: 2,
+      points: Array.from({ length: points }, (_, i) => ({ x: i, y: i })),
+    });
+    // fills the budget exactly with strokes of the largest allowed size
+    const fillBudget = () => {
+      const strokes = LIMITS.maxPenPointsPerBoard / LIMITS.penMaxPoints;
+      for (let i = 0; i < strokes; i++) {
+        service.addObject(
+          boardId,
+          'user-a',
+          stroke(`full${i}`, LIMITS.penMaxPoints),
+        );
+      }
+    };
+
+    it('throws BOARD_FULL for a stroke that would pass the budget', () => {
+      fillBudget();
+
+      expect(
+        codeOf(() => service.addObject(boardId, 'user-a', stroke('x', 1))),
+      ).toBe('BOARD_FULL');
+      expect(service.getBoard(boardId).objects.has('x')).toBe(false);
+    });
+
+    it('accepts a stroke that fits exactly into what is left', () => {
+      fillBudget();
+      service.deleteObject(boardId, 'full0');
+
+      const saved = service.addObject(
+        boardId,
+        'user-a',
+        stroke('fits', LIMITS.penMaxPoints),
+      );
+
+      expect(saved.id).toBe('fits');
+    });
+
+    it('does not count other shapes against the budget', () => {
+      fillBudget();
+
+      const saved = service.addObject(boardId, 'user-a', newRect('rect'));
+
+      expect(saved.id).toBe('rect');
+    });
   });
 
   it('keeps objects in the order they were added', () => {

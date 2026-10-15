@@ -1,7 +1,6 @@
 import type {
   BoardSnapshot,
   DrawingObject,
-  NewObject,
   ObjectPatch,
   User,
 } from '../types/boards.types';
@@ -22,26 +21,6 @@ export const ServerEvent = {
   PresenceLeft: 'presence:left',
   CursorMoved: 'cursor:moved',
 } as const;
-
-// client -> server payloads
-export interface JoinBoardPayload {
-  boardId: string;
-  user: { id: string; name: string };
-}
-export interface ObjectAddPayload {
-  object: NewObject;
-}
-export interface ObjectUpdatePayload {
-  id: string;
-  patch: ObjectPatch;
-}
-export interface ObjectDeletePayload {
-  id: string;
-}
-export interface CursorMovePayload {
-  x: number;
-  y: number;
-}
 
 // ack data
 export interface JoinBoardAck {

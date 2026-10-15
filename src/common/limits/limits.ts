@@ -2,6 +2,7 @@ export const LIMITS = {
   nameMaxLength: 30,
   textMaxLength: 1000,
   penMaxPoints: 5000,
+  maxPenPointsPerBoard: 100_000, // all strokes on one board together, about 8 MB of memory
   coordinateMax: 100_000, // x, y, width, height and so on stay within +/- this
   strokeWidthMax: 100,
   fontSizeMax: 500,

@@ -87,10 +87,27 @@ export class BoardsService implements OnModuleInit, OnModuleDestroy {
     if (board.objects.has(object.id)) {
       throw new AppError('DUPLICATE_OBJECT');
     }
+    if (
+      object.type === 'pen' &&
+      this.countPenPoints(board) + object.points.length >
+        LIMITS.maxPenPointsPerBoard
+    ) {
+      throw new AppError('BOARD_FULL');
+    }
     // The server decides the author and version, so these override anything the client sent.
     const saved: DrawingObject = { ...object, authorId: userId, version: 1 };
     board.objects.set(saved.id, saved);
     return saved;
+  }
+
+  // Counted when a stroke is added, so there is no number to keep in step with deletes.
+  // ponytail: walks every shape (at most maxObjectsPerBoard); keep a running total if that gets slow
+  private countPenPoints(board: BoardState): number {
+    let total = 0;
+    for (const object of board.objects.values()) {
+      if (object.type === 'pen') total += object.points.length;
+    }
+    return total;
   }
 
   updateObject(
